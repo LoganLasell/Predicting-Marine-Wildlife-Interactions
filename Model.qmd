@@ -1,0 +1,21 @@
+---
+title: "Fish_Model"
+format: html
+editor: visual
+---
+
+## Predicting Marine Wildlife Interactions
+
+```{r}
+# Load Libraries 
+
+library(tidyverse)
+library(bayesrules)
+library(tidybayes)
+```
+
+```{r}
+marine_catch <- read_csv("ps_2024_csv/catch_20241.csv") 
+
+marine_catch
+```
