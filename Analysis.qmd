@@ -1,0 +1,201 @@
+---
+title: "Protected Species Interaction Modeling"
+format: html
+editor: visual
+---
+
+```{r}
+# Packages used
+library(tidyverse)
+library(modelr)
+library(ggplot2)
+library(janitor)
+library(lubridate)
+library(tidybayes)
+library(rstanarm)
+library(bayesrules)
+```
+
+# 1. Introduction
+
+This analysis answers:
+
+> **How does hook/set effort and species type correlate with the likelihood and intensity of protected species interactions?**
+
+Outcomes:
+
+-   Probability of at least one protected species interaction (`protected_interaction`, 0/1)
+
+-   Expected number of protected species interactions (`protected_count`, integer)
+
+Data source: MRIP catch CSV provided by project partners.
+
+```{r}
+marine_catch <- read_csv("ps_2024_csv/catch_20241.csv") 
+
+marine_catch
+```
+
+```{r}
+marine_catch <- marine_catch %>%
+janitor::clean_names()
+```
+
+```{r}
+select(marine_catch, common, tot_cat, wgt_ab1, tot_len, landing, mode_fx, area_x, wave, year, st) %>%
+slice_head(n=10)
+```
+
+```{r}
+protected_species <- c(
+"LOGGERHEAD", "GREEN TURTLE", "LEATHERBACK", "HAWKSBILL", # example turtle names
+"DOLPHIN", "PORPOISE", # cetaceans (if recorded)
+"SAND TIGER", "SAND TIGER SHARK", "BONNETHEAD", "DUSKY SHARK"
+)
+```
+
+```{r}
+marine_catch <- marine_catch %>%
+mutate(
+common_up = toupper(if_else(is.na(common), "", common))
+)
+```
+
+```{r}
+marine_catch <- marine_catch %>%
+mutate(
+protected_interaction = if_else(common_up %in% protected_species & !is.na(tot_cat) & tot_cat > 0, 1L, 0L),
+protected_count = if_else(common_up %in% protected_species, if_else(is.na(tot_cat), 0L, as.integer(tot_cat)), 0L)
+)
+```
+
+```{r}
+marine_catch <- marine_catch %>%
+mutate(
+species_group = case_when(
+str_detect(common_up, "TURTLE|SEA TURTLE|LOGGERHEAD|GREEN|LEATHERBACK|HAWKSBILL") ~ "turtle",
+str_detect(common_up, "SHARK|TIGER|BONNETHEAD|DUSKY|SAND") ~ "shark",
+str_detect(common_up, "DOLPHIN|PORPOISE") ~ "cetacean",
+common_up == "" ~ "unknown",
+TRUE ~ "other_fish"
+),
+wave = as.factor(wave),
+area_x = as.factor(area_x),
+mode_fx = as.factor(mode_fx),
+year = as.integer(year)
+)
+```
+
+```{r}
+marine_catch %>% select(common, common_up, species_group, protected_interaction, protected_count, tot_cat, wave, area_x, mode_fx) %>% slice_head(n=12)
+```
+
+```{r}
+#Count total protected interactions (weighted & unweighted)
+summary_df <- marine_catch %>%
+summarise(
+total_records = n(),
+total_protected_records = sum(protected_interaction, na.rm = TRUE),
+total_protected_individuals = sum(protected_count, na.rm = TRUE)
+)
+
+summary_df
+```
+
+```{r}
+#Protected interactions by species group
+marine_catch %>%
+group_by(species_group) %>%
+summarise(
+records = n(),
+protected_records = sum(protected_interaction, na.rm = TRUE),
+protected_individuals = sum(protected_count, na.rm = TRUE)
+) %>%
+arrange(desc(protected_individuals)) %>%
+ggplot(aes(x = fct_reorder(species_group, protected_individuals), y = protected_individuals)) +
+geom_col() +
+coord_flip() +
+labs(title = "Protected individuals by species group",
+x = "", y = "Protected individuals (count)")
+```
+
+```{r}
+marine_catch %>%
+group_by(wave) %>%
+summarise(protected_records = sum(protected_interaction, na.rm = TRUE)) %>%
+ggplot(aes(x = wave, y = protected_records)) +
+geom_col() +
+labs(title = "Protected interactions by sampling wave (season)", x = "Wave", y = "Protected interactions")
+```
+
+```{r}
+marine_catch %>%
+group_by(mode_fx, area_x) %>%
+summarise(protected = sum(protected_interaction, na.rm = TRUE)) %>%
+ggplot(aes(x = mode_fx, y = protected, fill = area_x)) +
+geom_col(position = "dodge") +
+labs(title = "Protected interactions by fishing mode and area", x = "Mode", y = "Protected interactions")
+```
+
+```{r}
+marine_catch %>%
+summarise(mean_tot_cat = mean(tot_cat, na.rm = TRUE),
+median_tot_cat = median(tot_cat, na.rm = TRUE),
+pct_with_catch = mean(tot_cat > 0, na.rm = TRUE))
+```
+
+```{r}
+use_rstanarm <- requireNamespace("rstanarm", quietly = TRUE)
+use_brms <- requireNamespace("brms", quietly = TRUE)
+use_arm <- requireNamespace("arm", quietly = TRUE)
+
+message("Packages available: rstanarm=", use_rstanarm, " brms=", use_brms, " arm=", use_arm)
+```
+
+```{r}
+form_logit <- as.formula("protected_interaction ~ mode_fx + area_x + wave + species_group + year")
+form_count <- as.formula("protected_count ~ mode_fx + area_x + wave + species_group + year")
+```
+
+```{r}
+# Collapse to trip-level data
+trip_level <- marine_catch %>%
+  group_by(id_code) %>%
+  summarise(
+    protected_hit = as.integer(any(protected_interaction == 1)),
+    total_catch = sum(tot_cat, na.rm = TRUE),
+    mode_fx = first(mode_fx),
+    area_x = first(area_x),
+    wave = first(wave),
+    year = first(year)
+  )
+
+# Logistic regression (Bernoulli likelihood)
+fit_logit <- stan_glm(
+  protected_hit ~ total_catch + mode_fx + area_x,
+  data = trip_level,
+  family = binomial(link = "logit"),
+  prior = normal(0, 1),
+  prior_intercept = normal(0, 2),
+  seed = 123
+)
+
+fit_logit
+```
+
+```{r}
+logit_draws <- as_tidy_draws(fit_logit)
+
+logit_draws %>%
+  median_qi()
+```
+
+##plots for later need to reevaluate
+
+fit_logit \<- stan_glm( protected_hit \~ total_catch + mode_fx + area_x, data = trip_level, family = binomial(link = "logit"), chains = 4, iter = 2000, seed = 123 )
+
+param_draws \<- fit_logit %\>% gather_draws(`b_.*`, regex = TRUE)
+
+pred_data \<- trip_level %\>% data_grid( total_catch = seq(min(total_catch), max(total_catch), length.out = 50), mode_fx, area_x ) %\>% add_fitted_draws(fit_logit, scale = "response")
+
+ggplot(pred_data, aes(total_catch, .value, group = .draw)) + stat_lineribbon(aes(y = .value), .width = c(.50, .80, .95)) + facet_grid(mode_fx \~ area_x) + labs( x = "Total Catch", y = "Predicted Probability of Protected Interaction" ) + theme_minimal()
