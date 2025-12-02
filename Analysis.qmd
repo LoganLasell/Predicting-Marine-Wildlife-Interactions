@@ -190,6 +190,10 @@ logit_draws %>%
   median_qi()
 ```
 
+```{r}
+exp(posterior_interval(fit_logit, prob = 0.80))
+```
+
 ##plots for later need to reevaluate
 
 fit_logit \<- stan_glm( protected_hit \~ total_catch + mode_fx + area_x, data = trip_level, family = binomial(link = "logit"), chains = 4, iter = 2000, seed = 123 )
