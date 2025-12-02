@@ -1,0 +1,143 @@
+---
+title: "high_value_species"
+format: html
+editor: visual
+---
+
+1.  Introduction
+
+This analysis answers:
+
+How does fishing effort, mode, and location correlate with the likelihood and intensity of high-value species interactions?
+
+Outcomes:
+
+-   Probability of at least one high-value species catch (`high_value_interaction`, 0/1)
+-   Expected number of high-value species caught (`high_value_count`, integer)
+
+Data source: MRIP 2024 catch CSV provided by project partners.
+
+```{r}
+# Packages used
+library(tidyverse)
+library(modelr)
+library(ggplot2)
+library(janitor)
+library(lubridate)
+library(tidybayes)
+library(rstanarm)
+library(bayesrules)
+```
+
+```{r}
+marine_catch <- read_csv("ps_2024_csv/catch_20241.csv") 
+
+marine_catch
+```
+
+\
+
+```{r}
+marine_catch <- marine_catch %>% janitor::clean_names()
+
+# List all unique species names
+unique_species <- unique(marine_catch$common)
+length(unique_species)
+
+```
+
+```{r}
+#define high value species
+high_value_species <- c( "YELLOWFIN TUNA", "BLUEFIN TUNA", "SKIPJACK TUNA", "BLACKFIN TUNA", "LITTLE TUNNY", "WAHOO", "SAILFISH", "SWORDFISH", "ATLANTIC TARPON", "GROUPER GENUS (EPINEPHELUS)", "RED GROUPER", "BLACK GROUPER", "GOLIATH GROUPER", "SNAPPER GENUS", "GRAY SNAPPER", "MUTTON SNAPPER", "RED SNAPPER", "YELLOWTAIL SNAPPER", "GREATER AMBERJACK", "KING MACKEREL", "GREAT BARRACUDA", "COBIA", "BONNETHEAD", "HAMMERHEAD SHARK GENUS", "BLACKNOSE SHARK", "NURSE SHARK", "ATLANTIC SHARPNOSE SHARK", "REQUIEM SHARK GENUS", "SMOOTH DOGFISH", "SPINNER SHARK" )
+```
+
+```{r}
+#create high value indicators
+marine_catch <- marine_catch %>% mutate( common_up = toupper(common), high_value_interaction = if_else(common_up %in% high_value_species & !is.na(tot_cat) & tot_cat > 0, 1L, 0L), high_value_count = if_else(common_up %in% high_value_species, if_else(is.na(tot_cat), 0L, as.integer(tot_cat)), 0L) )
+```
+
+```{r}
+#classify species groups for plotting
+marine_catch <- marine_catch %>% mutate( species_group = case_when( str_detect(common_up, "TUNA|TUNNY|WAHOO|SAILFISH|SWORDFISH|TARPON") ~ "pelagic_game", str_detect(common_up, "GROUPER|SNAPPER|AMBERJACK|COBIA") ~ "reef_game", str_detect(common_up, "SHARK") ~ "shark", common_up == "" ~ "unknown", TRUE ~ "other_fish" ), wave = as.factor(wave), area_x = as.factor(area_x), mode_fx = as.factor(mode_fx), year = as.integer(year) )
+```
+
+```{r}
+#Preview processed data
+marine_catch %>% select(common, common_up, species_group, high_value_interaction, high_value_count, tot_cat, wave, area_x, mode_fx) %>% slice_head(n = 12)
+```
+
+```{r}
+#Summarize total high-value interactions
+summary_df <- marine_catch %>% summarise( total_records = n(), total_high_value_records = sum(high_value_interaction, na.rm = TRUE), total_high_value_individuals = sum(high_value_count, na.rm = TRUE) )
+
+summary_df
+```
+
+```{r}
+#high-value interactions by species group
+marine_catch %>% group_by(species_group) %>% summarise( records = n(), high_value_records = sum(high_value_interaction, na.rm = TRUE), high_value_individuals = sum(high_value_count, na.rm = TRUE) ) %>% arrange(desc(high_value_individuals)) %>% ggplot(aes(x = fct_reorder(species_group, high_value_individuals), y = high_value_individuals)) + geom_col() + coord_flip() + labs(title = "High-Value Individuals by Species Group", x = "", y = "Individuals Caught")
+```
+
+```{r}
+# Map numeric codes to names
+marine_catch <- marine_catch %>%
+  mutate(
+    mode_fx = factor(mode_fx,
+                     levels = c("3", "5", "7"),
+                     labels = c("Shore", "Private", "Charter")),
+    area_x = factor(area_x,
+                    levels = c("1", "2", "3", "4", "5"),
+                    labels = c("Area 1", "Area 2", "Area 3", "Area 4", "Area 5"))
+  )
+
+# Now the plot will show the names instead of numbers
+marine_catch %>%
+  group_by(mode_fx, area_x) %>%
+  summarise(high_value = sum(high_value_interaction, na.rm = TRUE)) %>%
+  ggplot(aes(x = mode_fx, y = high_value, fill = area_x)) +
+  geom_col(position = "dodge") +
+  labs(title = "High-Value Interactions by Fishing Mode and Area",
+       x = "Fishing Mode", y = "High-Value Interactions")
+```
+
+```{r}
+#Descriptive stats
+marine_catch %>% summarise( mean_tot_cat = mean(tot_cat, na.rm = TRUE), median_tot_cat = median(tot_cat, na.rm = TRUE), pct_with_catch = mean(tot_cat > 0, na.rm = TRUE) )
+```
+
+```{r}
+#Check rstanarm/tidybayes availability
+message("Packages available: rstanarm=", requireNamespace("rstanarm", quietly = TRUE), " brms=", requireNamespace("brms", quietly = TRUE), " arm=", requireNamespace("arm", quietly = TRUE))
+```
+
+```{r}
+#Formulas for modeling
+form_logit <- as.formula("high_value_interaction ~ mode_fx + area_x + wave + species_group + year") 
+form_count <- as.formula("high_value_count ~ mode_fx + area_x + wave + species_group + year")
+```
+
+```{r}
+#Collapse to trip-level data
+trip_level <- marine_catch %>% group_by(id_code) %>% summarise( target_hit = as.integer(any(high_value_interaction == 1)), total_catch = sum(tot_cat, na.rm = TRUE), mode_fx = first(mode_fx), area_x = first(area_x), wave = first(wave), year = first(year) )
+```
+
+```{r}
+#Bayesian logistic regression (trip-level)
+fit_logit <- stan_glm( target_hit ~ total_catch + mode_fx + area_x, data = trip_level, family = binomial(link = "logit"), prior = normal(0, 1), prior_intercept = normal(0, 2), chains = 4, iter = 2000, seed = 123 )
+
+fit_logit
+```
+
+```{r}
+#posterior draws
+logit_draws <- tidy_draws(fit_logit)
+
+logit_draws %>% median_qi()
+```
+
+```{r}
+#Posterior predictive plot
+pred_data <- trip_level %>% data_grid( total_catch = seq(min(total_catch), max(total_catch), length.out = 50), mode_fx, area_x ) %>% add_fitted_draws(fit_logit, scale = "response")
+
+ggplot(pred_data, aes(total_catch, .value, group = .draw)) + stat_lineribbon(.width = c(.50, .80, .95)) + facet_grid(mode_fx ~ area_x) + labs( x = "Total Catch", y = "Predicted Probability of High-Value Interaction" ) + theme_minimal()
+```
