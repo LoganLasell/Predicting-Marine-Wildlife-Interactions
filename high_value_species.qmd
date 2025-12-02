@@ -79,7 +79,7 @@ marine_catch %>% group_by(species_group) %>% summarise( records = n(), high_valu
 ```
 
 ```{r}
-# Map numeric codes to names
+#map numeric codes to names
 marine_catch <- marine_catch %>%
   mutate(
     mode_fx = factor(mode_fx,
