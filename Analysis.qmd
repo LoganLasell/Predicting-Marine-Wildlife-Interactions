@@ -184,7 +184,7 @@ fit_logit
 ```
 
 ```{r}
-logit_draws <- as_tidy_draws(fit_logit)
+logit_draws <- tidy_draws(fit_logit)
 
 logit_draws %>%
   median_qi()
