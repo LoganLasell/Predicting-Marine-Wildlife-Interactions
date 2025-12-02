@@ -184,10 +184,14 @@ fit_logit
 ```
 
 ```{r}
-logit_draws <- as_tidy_draws(fit_logit)
+logit_draws <- tidy_draws(fit_logit)
 
 logit_draws %>%
   median_qi()
+```
+
+```{r}
+exp(posterior_interval(fit_logit, prob = 0.80))
 ```
 
 ##plots for later need to reevaluate
