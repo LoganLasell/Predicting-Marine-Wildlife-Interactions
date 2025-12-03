@@ -11,8 +11,10 @@ Access the data: https://www.st.nmfs.noaa.gov/st1/recreational/MRIP_Survey_Data/
 
 Team Members
 <img src="profile_photo.jpeg" alt="Brandon" width="150"/>
+
 Brandon Koskie
 
 Data and Computer Science student with experience in ecological data visualization and Shiny dashboard development. Passionate about applying computational tools to conservation science. Has been part of the Maunalua Fishpond Heritage Center Dashboard Cohort.
 [GitHub](https://github.com/BrandonKoskie)
+
 
