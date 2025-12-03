@@ -1,0 +1,149 @@
+---
+title: "High Value and Rare Species App"
+format: html
+runtime: shiny
+editor: visual
+---
+
+```{r}
+library(shiny)
+library(tidyverse)
+library(janitor)
+library(tidybayes)
+library(rstanarm)
+library(ggplot2)
+library(openai)
+
+ui <- fluidPage(
+  
+  h2("High-Value Species Dashboard"),
+  p("Explore fishing effort, mode, and location correlations with high-value species."),
+  
+  tabsetPanel(
+    tabPanel("Plots",
+             plotOutput("species_group_plot"),
+             plotOutput("mode_area_plot"),
+             plotOutput("posterior_plot")
+    ),
+    tabPanel("Chatbot",
+             textInput("user_question", "Ask a question about the dataset:", ""),
+             actionButton("ask_btn", "Ask"),
+             verbatimTextOutput("chat_answer")
+    )
+  )
+)
+
+```
+
+```{r, echo=FALSE}
+server <- function(input, output, session) {
+  
+  # --- Load and clean data ---
+  marine_catch <- read_csv("ps_2024_csv/catch_20241.csv") %>% clean_names()
+  
+  high_value_species <- c(
+    "YELLOWFIN TUNA", "BLUEFIN TUNA", "SKIPJACK TUNA", "BLACKFIN TUNA",
+    "LITTLE TUNNY", "WAHOO", "SAILFISH", "SWORDFISH", "ATLANTIC TARPON",
+    "GROUPER GENUS (EPINEPHELUS)", "RED GROUPER", "BLACK GROUPER", "GOLIATH GROUPER",
+    "SNAPPER GENUS", "GRAY SNAPPER", "MUTTON SNAPPER", "RED SNAPPER",
+    "YELLOWTAIL SNAPPER", "GREATER AMBERJACK", "KING MACKEREL", "GREAT BARRACUDA",
+    "COBIA", "BONNETHEAD", "HAMMERHEAD SHARK GENUS", "BLACKNOSE SHARK", "NURSE SHARK",
+    "ATLANTIC SHARPNOSE SHARK", "REQUIEM SHARK GENUS", "SMOOTH DOGFISH", "SPINNER SHARK"
+  )
+  
+  marine_catch <- marine_catch %>%
+    mutate(
+      common_up = toupper(common),
+      high_value_interaction = if_else(common_up %in% high_value_species & !is.na(tot_cat) & tot_cat > 0, 1L, 0L),
+      high_value_count = if_else(common_up %in% high_value_species, if_else(is.na(tot_cat), 0L, as.integer(tot_cat)), 0L),
+      species_group = case_when(
+        common_up %in% c("YELLOWFIN TUNA","BLUEFIN TUNA","SKIPJACK TUNA","BLACKFIN TUNA",
+                         "LITTLE TUNNY","WAHOO","SAILFISH","SWORDFISH","ATLANTIC TARPON",
+                         "KING MACKEREL","GREATER AMBERJACK","GREAT BARRACUDA") ~ "pelagic_game",
+        common_up %in% c("GROUPER GENUS (EPINEPHELUS)","RED GROUPER","BLACK GROUPER","GOLIATH GROUPER",
+                         "SNAPPER GENUS","GRAY SNAPPER","MUTTON SNAPPER","RED SNAPPER",
+                         "YELLOWTAIL SNAPPER","COBIA") ~ "reef_game",
+        common_up %in% c("BONNETHEAD","HAMMERHEAD SHARK GENUS","BLACKNOSE SHARK","NURSE SHARK",
+                         "ATLANTIC SHARPNOSE SHARK","REQUIEM SHARK GENUS","SMOOTH DOGFISH","SPINNER SHARK") ~ "shark",
+        common_up == "" ~ "unknown",
+        TRUE ~ "other_fish"
+      ),
+      wave = as.factor(wave),
+      area_x = factor(area_x, levels = c("1","2","3","4","5"),
+                      labels = c("Ocean <= 3 mi (all but WFL)", "Ocean > 3 mi (all but WFL)",
+                                 "Ocean <= 10 mi (WFL only)", "Ocean > 10 mi (WFL only)", "Inland")),
+      mode_fx = factor(mode_fx, levels = c("3","5","7"), labels = c("Shore","Private","Charter")),
+      year = as.integer(year)
+    )
+  
+  # --- Trip-level collapse ---
+  trip_level <- marine_catch %>%
+    group_by(id_code) %>%
+    summarise(target_hit = as.integer(any(high_value_interaction == 1)),
+              total_catch = sum(tot_cat, na.rm = TRUE),
+              mode_fx = first(mode_fx),
+              area_x = first(area_x),
+              wave = first(wave),
+              year = first(year))
+  
+  # --- Fit Bayesian logistic regression ---
+  fit_logit <- stan_glm(target_hit ~ total_catch + mode_fx + area_x,
+                        data = trip_level,
+                        family = binomial(link = "logit"),
+                        prior = normal(0,1),
+                        prior_intercept = normal(0,2),
+                        chains = 4, iter = 2000, seed = 123)
+  
+  # --- Load or generate posterior predictions ---
+  if (file.exists("pred_data_cached.rds")) {
+    pred_data_cached <- readRDS("pred_data_cached.rds")
+  } else {
+    pred_grid <- trip_level %>%
+      data_grid(total_catch = seq(min(total_catch), max(total_catch), length.out = 20),
+                mode_fx, area_x)
+    pred_data_cached <- add_epred_draws(fit_logit, newdata = pred_grid, ndraws = 500)
+    saveRDS(pred_data_cached, "pred_data_cached.rds")
+  }
+  
+  # --- Render plots ---
+  output$species_group_plot <- renderPlot({
+    marine_catch %>%
+      group_by(species_group) %>%
+      summarise(high_value_individuals = sum(high_value_count, na.rm = TRUE)) %>%
+      ggplot(aes(x = fct_reorder(species_group, high_value_individuals), y = high_value_individuals)) +
+      geom_col(fill = "steelblue") +
+      coord_flip() +
+      labs(title = "High-Value Individuals by Species Group", x = "", y = "Individuals Caught")
+  })
+  
+  output$mode_area_plot <- renderPlot({
+    marine_catch %>%
+      group_by(mode_fx, area_x) %>%
+      summarise(high_value = sum(high_value_interaction, na.rm = TRUE)) %>%
+      ggplot(aes(x = mode_fx, y = high_value, fill = area_x)) +
+      geom_col(position = "dodge") +
+      labs(title = "High-Value Interactions by Fishing Mode and Area",
+           x = "Fishing Mode", y = "High-Value Interactions")
+  })
+  
+  # --- Chatbot using OpenAI ---
+  output$chat_answer <- renderText({
+    req(input$ask_btn)
+    user_prompt <- paste0(
+      "You are an R assistant. The dataset 'marine_catch' has columns: common, tot_cat, high_value_interaction, high_value_count, species_group, wave, area_x, mode_fx, year. ",
+      "Answer the user's question clearly using this dataset only. Question: ", input$user_question
+    )
+    response <- openai::create_chat_completion(
+      model = "gpt-4",
+      messages = list(
+        list(role = "system", content = "You are an R data assistant."),
+        list(role = "user", content = user_prompt)
+      ),
+      temperature = 0
+    )
+    response$choices[[1]]$message$content
+  })
+}
+
+
+```
