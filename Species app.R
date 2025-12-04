@@ -11,6 +11,7 @@ library(plotly)
 library(shinyWidgets)
 library(shinycssloaders)
 library(openai)
+library(modelr)
 
 # --- OpenAI Model ---
 openai_model <- "gpt-4o"
@@ -76,11 +77,27 @@ fit_logit <- stan_glm(
 )
 
 # --- Posterior predictions ---
-pred_grid <- trip_level %>%
-  data_grid(total_catch = seq(min(total_catch), max(total_catch), length.out = 20),
-            mode_fx, area_x)
+post_draws <- posterior_predict(fit_logit, newdata = trip_level, draws = 300)
 
-pred_data_cached <- add_epred_draws(fit_logit, newdata = pred_grid, ndraws = 500)
+trip_level <- trip_level %>% mutate(.row = row_number())
+
+post_long <- as.data.frame(t(post_draws)) %>%  # transpose so rows = rows of trip_level
+  mutate(.row = row_number()) %>%
+  pivot_longer(cols = - .row, names_to = "draw", values_to = "pred") %>%
+  mutate(draw = as.integer(draw))
+
+post_long <- post_long %>%
+  left_join(trip_level, by = ".row")
+
+posterior_summary <- post_long %>%
+  group_by(total_catch) %>%
+  summarise(
+    mean_prob = mean(pred),
+    lower = quantile(pred, 0.025),
+    upper = quantile(pred, 0.975),
+    .groups = "drop"
+  )
+
 
 # --- UI ---
 ui <- fluidPage(
@@ -130,12 +147,15 @@ server <- function(input, output, session) {
       labs(x = "Fishing Mode", y = "High-Value Interactions")
   })
   
+ 
   output$posterior_plot <- renderPlot({
-    ggplot(pred_data_cached, aes(total_catch, .epred, group = .draw)) +
-      stat_lineribbon(.width = c(.50, .80, .95)) +
-      facet_grid(mode_fx ~ area_x) +
-      labs(x = "Total Catch", y = "Predicted Probability") +
-      theme_minimal()
+    ggplot(posterior_summary, aes(x = total_catch, y = mean_prob)) +
+      geom_line(color = "steelblue") +
+      labs(
+        x = "Total Catch",
+        y = "Posterior Probability of High-Value Interaction",
+        title = "Predicted Probability with 95% Credible Interval"
+      )
   })
   
   # --- Chatbot ---

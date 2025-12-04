@@ -195,7 +195,7 @@ exp(posterior_interval(fit_logit, prob = 0.80))
 ```
 
 ```{r}
-post_draws <- posterior_predict(fit_logit, newdata = trip_level, draws = 100)
+post_draws <- posterior_predict(fit_logit, newdata = trip_level, draws = 300)
 
 ```
 
@@ -224,14 +224,25 @@ posterior_summary <- post_long %>%
 
 ggplot(posterior_summary, aes(x = total_catch, y = mean_prob)) +
   geom_line(color = "steelblue") +
-  #geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
-  labs(x = "Total Catch", y = "Posterior Probability of High-Value Interaction")
+  labs(
+    x = "Total Catch",
+    y = "Posterior Probability of High-Value Interaction",
+    title = "Predicted Probability with 95% Credible Interval"
+  )
+
 
   
 ```
 
 ```{r}
-class(fit_logit)
+ggplot(posterior_summary, aes(x = total_catch, y = mean_prob)) +
+  geom_line(color = "steelblue") +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
+  labs(
+    x = "Total Catch",
+    y = "Posterior Probability of High-Value Interaction",
+    title = "Predicted Probability with 95% Credible Interval"
+  )
 ```
 
 ```{r}
