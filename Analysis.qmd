@@ -170,7 +170,7 @@ trip_level <- marine_catch %>%
     year = first(year)
   )
 
-# Logistic regression (Bernoulli likelihood)
+# Logistic regression 
 fit_logit <- stan_glm(
   protected_hit ~ total_catch + mode_fx + area_x,
   data = trip_level,
