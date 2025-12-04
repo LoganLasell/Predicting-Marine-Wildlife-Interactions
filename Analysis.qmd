@@ -194,6 +194,30 @@ logit_draws %>%
 exp(posterior_interval(fit_logit, prob = 0.80))
 ```
 
+```{r}
+epred_draws(fit_logit, newdata = trip_level) %>%
+  ggplot(aes(x = total_catch , y = protected_hit, group = .draw)) +
+  geom_point(alpha = 0.5) +
+  labs(y = "Probability of protected hit")
+
+```
+
+```{r}
+class(trip_level)
+names(trip_level)
+model.matrix(formula(fit_logit), data = trip_level)
+```
+
+```{r}
+class(fit_logit)
+```
+
+```{r}
+
+```
+
+ggplot(aes(x = area_x, y = protected_hit)) + geom_line(aes(y = .value, group = .draw), alpha = 0.15) + labs(y = "probability of protected hit")
+
 ##plots for later need to reevaluate
 
 fit_logit \<- stan_glm( protected_hit \~ total_catch + mode_fx + area_x, data = trip_level, family = binomial(link = "logit"), chains = 4, iter = 2000, seed = 123 )
