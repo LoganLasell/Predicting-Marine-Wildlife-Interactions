@@ -226,7 +226,7 @@ ggplot(posterior_summary, aes(x = total_catch, y = mean_prob)) +
   geom_line(color = "steelblue") +
   labs(
     x = "Total Catch",
-    y = "Posterior Probability of High-Value Interaction",
+    y = "Posterior Probability of Protected Species Interaction",
     title = "Predicted Probability with 95% Credible Interval"
   )
 
@@ -240,7 +240,7 @@ ggplot(posterior_summary, aes(x = total_catch, y = mean_prob)) +
   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
   labs(
     x = "Total Catch",
-    y = "Posterior Probability of High-Value Interaction",
+    y = "Posterior Probability of Protected Species Interaction",
     title = "Predicted Probability with 95% Credible Interval"
   )
 ```
