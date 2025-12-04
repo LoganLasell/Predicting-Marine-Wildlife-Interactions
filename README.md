@@ -25,8 +25,10 @@ Data and Computer Science student with experience in ecological data visualizati
 Logan Lasell
 
 Computer Science student at Chaminade University. Has a background in computational data analytics, software engineering, and machine learning. Enjoys applied sciences, math and computation.
+[Github](https://github.com/LoganLasell)
 
 
 <img src="https://assets.chaminade.edu/wp-content/uploads/2018/08/08074025/Chaminade-Logo-Centered.jpg" alt="Chaminade Logo" width="300" height="200">
+
 
 
