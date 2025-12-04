@@ -12,6 +12,7 @@ library(shinyWidgets)
 library(shinycssloaders)
 library(openai)
 library(modelr)
+library(forcats)
 
 # --- OpenAI Model ---
 openai_model <- "gpt-4o"
@@ -77,7 +78,7 @@ fit_logit <- stan_glm(
 )
 
 # --- Posterior predictions ---
-post_draws <- posterior_predict(fit_logit, newdata = trip_level, draws = 300)
+post_draws <- posterior_predict(fit_logit, newdata = trip_level, draws = 500)
 
 trip_level <- trip_level %>% mutate(.row = row_number())
 
