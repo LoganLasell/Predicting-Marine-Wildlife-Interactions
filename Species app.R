@@ -150,6 +150,7 @@ server <- function(input, output, session) {
  
   output$posterior_plot <- renderPlot({
     ggplot(posterior_summary, aes(x = total_catch, y = mean_prob)) +
+      geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
       geom_line(color = "steelblue") +
       labs(
         x = "Total Catch",
